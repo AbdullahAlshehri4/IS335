@@ -6,7 +6,7 @@ from faker import Faker
 
 app = Flask(__name__)
 fake = Faker()
-
+#test
 @app.route('/rides/request', methods=['POST'])
 def request_ride():
     flag=False
