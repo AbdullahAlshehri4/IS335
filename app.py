@@ -14,7 +14,7 @@ def request_ride():
     rider_name = data.get("rider_name")
     drop_off = data.get("drop_off")
     pick_up = data.get("pick_up")
-    driver_id = data.get("driver_id")
+
 
 
 
@@ -67,7 +67,7 @@ def request_ride():
                    """),
             {
                 "ride_id": fake.random_number(7,fix_len=True),
-                "driver_id": driver_id,
+                "driver_id": 0000000,
                 "rider_id": rider_id,
                 "status": "requested",
                 "total_price": estimated_price,
@@ -84,9 +84,7 @@ def request_ride():
 
     return jsonify({
         "message": "Ride requested successfully  ",
-        "rider_id": rider_id,
-        "email": email,
-        "phone_number": phone_number
+        "For rider": rider_name,
     }), 201
 
 @app.route('/rides/accept', methods=['POST'])
@@ -102,9 +100,11 @@ def accept_ride():
             {"driver_id": driver_id}
 
         )
+        driver=result.fetchone()
         status = result.scalar()
-
-        if status =="offline":
+        if not driver:
+            return jsonify({"error": "Driver not found"}), 404
+        elif status =="offline":
             return jsonify({"error": "Driver offline"}), 404
 
         conn.execute(
@@ -118,7 +118,7 @@ def accept_ride():
 
     return jsonify({
             "message": "Ride accepted successfully  ",
-
+            "for driver": driver_id,
         }), 201
 
 
