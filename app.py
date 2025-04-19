@@ -1,4 +1,4 @@
-import faker
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from sqlalchemy import text, false
 from dbSetup import engine, update
@@ -37,6 +37,27 @@ def request_ride():
 
         rider_id, email, phone_number = rider
 
+        result = conn.execute(
+            text("""
+                      SELECT ST_DistanceSphere(
+                   ST_GeomFromEWKB(decode(:pickup, 'hex')),
+                   ST_GeomFromEWKB(decode(:dropoff, 'hex'))
+                                    ) / 1000 AS distance_km
+
+                   """),
+            {"pickup": pick_up, "dropoff": drop_off}
+        )
+        distance_km = result.scalar()
+
+
+        speed_kmh = 40
+        #duration_hours = distance_km / speed_kmh
+        #estimated_duration_minutes = int(duration_hours * 60)
+
+        estimated_price = round(distance_km * 2, 2)
+
+        #estimated_arrival_time = datetime.utcnow() + timedelta(minutes=estimated_duration_minutes)
+
 
         conn.execute(
             text("""
@@ -49,9 +70,9 @@ def request_ride():
                 "driver_id": driver_id,
                 "rider_id": rider_id,
                 "status": "requested",
-                "total_price": fake.random_int(min=10, max=99),
+                "total_price": estimated_price,
                 "duration": fake.time(),
-                "distance_traveled": 0,
+                "distance_traveled": distance_km,
                 "pickup_location_geo": pick_up,
                 "dropoff_location_geo": drop_off
             }
@@ -67,5 +88,39 @@ def request_ride():
         "email": email,
         "phone_number": phone_number
     }), 201
+
+@app.route('/rides/accept', methods=['POST'])
+def accept_ride():
+    data = request.json
+    ride_id=data.get("ride_id")
+    driver_id=data.get("driver_id")
+
+
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT status FROM driver WHERE driver_id = :driver_id"),
+            {"driver_id": driver_id}
+
+        )
+        status = result.scalar()
+
+        if status =="offline":
+            return jsonify({"error": "Driver offline"}), 404
+
+        conn.execute(
+            text("UPDATE ride SET status = :status WHERE ride_id = :ride_id AND driver_id=:driver_id"),
+            {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted'}
+        )
+
+        conn.commit()
+
+
+
+    return jsonify({
+            "message": "Ride accepted successfully  ",
+
+        }), 201
+
+
 if __name__ == '__main__':
     app.run(debug=True)
