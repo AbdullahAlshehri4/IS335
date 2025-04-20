@@ -89,57 +89,63 @@ def request_ride():
 @app.route('/rides/accept', methods=['POST'])
 def accept_ride():
     data = request.json
-    ride_id=data.get("ride_id")
-    driver_id=data.get("driver_id")
+    ride_id=str(data.get("ride_id"))
+    driver_id=str(data.get("driver_id"))
 #total price --> database price totalprice=1+surge*
 
     with engine.connect() as conn:
-        result = conn.execute(
+        driver_status = conn.execute(
             text("SELECT status FROM driver WHERE driver_id = :driver_id"),
             {"driver_id": driver_id}
 
         )
-        test=conn.execute(text("select ride_id from ride_id r join surge_ride s on r.ride_id=s.ride_id where ride_id=:ride_id",
-        {"ride_id": ride_id}))
-        result2=conn.execute(text('select total_price from ride where ride_id=:ride_id',
-                                      {"ride_id": ride_id}
-                                  ))
-        total_price=result2.scalar()
-
-        type= conn.execute(text("Select 'd.type' from vehicle, v where driver_id = :driver_id"),
-                              {"driver_id": driver_id})
-        type=type.scalar()
-        type_price=0
-        if type=="premium":
-         type_price=0.1*total_price
-         total_price=total_price+type_price
-
-        elif type=="family":
-         type_price=0.25*total_price
-         total_price=total_price+type_price
-
-        else:
-            type_price=0
-            total_price=total_price+type_price
-
-        surge=conn.execute(text("select distinct on (r.ride_id) r.ride_id,s.surge_area_id1 from ride r join surge_areas "
-                                "on ST_DistanceSphere(r.pickup_location_geo,s.location)<5000 order by r.ride_id, "
-                                "ST_DistanceSphere(r.pickup_location_geo,s.location)"))
-
-        conn.execute(
-            text("UPDATE ride SET status = :status,total_price= :total_price WHERE ride_id = :ride_id AND driver_id=:driver_id"),
-            {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted'}
+        driver_status=driver_status.scalar()
+        ride_status=conn.execute(text(
+            "Select status from ride where ride_id=:ride_id"),
+            {"ride_id":ride_id}
         )
+        ride_status=ride_status.scalar()
+        if driver_status=="online" and ride_status=="requested":
+            result2 = conn.execute(
+                text('select total_price from ride where ride_id=:ride_id'),
+                {'ride_id': ride_id}
+            )
+            total_price=result2.scalar()
 
+            type= conn.execute(text("Select d.type from vehicle d where driver_id=:driver_id"),
+                                  {"driver_id": driver_id})
+            type=type.scalar()
+            base_price=total_price
+            if type=="premium":
+                total_price*=1.1
+            elif type=="family":
+                total_price*=1.25
 
-        conn.commit()
+            surge = conn.execute(text(
+                "SELECT s.multiplier "
+                "FROM ride r "
+                "JOIN surge_areas s ON ST_DistanceSphere(r.pickup_location_geo, s.location) < 5000 "
+                "WHERE r.ride_id = :ride_id "
+                "ORDER BY ST_DistanceSphere(r.pickup_location_geo, s.location) "
+                "LIMIT 1"
+            ), {"ride_id": ride_id})
+            surge = surge.fetchone()
+            total_price+=(surge[0]-1)*base_price
+            conn.execute(
+                text("UPDATE ride SET status = :status,total_price= :total_price,driver_id=:driver_id WHERE ride_id = :ride_id"),
+                {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted',"total_price":total_price}
+            )
 
-
-
-    return jsonify({
-            "message": "Ride accepted successfully  ",
-            "for driver": driver_id,
-        }), 201
+            conn.commit()
+            return jsonify({
+                "message": "Ride accepted successfully  ",
+                "for driver": driver_id,
+                "test": total_price,
+            }), 201
+        return jsonify({
+            "message": "Driver is not online" }) if driver_status=="online" else jsonify({
+            "message": "Ride is already accepted"
+        })
 
 
 if __name__ == '__main__':
