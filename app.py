@@ -27,11 +27,10 @@ def request_ride():
     with engine.connect() as conn:
 
         result = conn.execute(
-            text("SELECT rider_id, email, phone_number FROM rider WHERE name = :name LIMIT 1"),
+        text("SELECT rider_id, email, phone_number FROM rider WHERE name = :name LIMIT 1"),
             {"name": rider_name}
         )
         rider = result.fetchone()
-
         if not rider:
             return jsonify({"error": "Rider not found"}), 404
 
@@ -50,24 +49,24 @@ def request_ride():
         distance_km = result.scalar()
 
 
+
         speed_kmh = 40
         #duration_hours = distance_km / speed_kmh
         #estimated_duration_minutes = int(duration_hours * 60)
 
-        estimated_price = round(distance_km * 2, 2)
+        estimated_price = round(distance_km * 5, 2)
 
         #estimated_arrival_time = datetime.utcnow() + timedelta(minutes=estimated_duration_minutes)
 
 
         conn.execute(
             text("""
-                       INSERT INTO ride (ride_id,driver_id,rider_id, status,total_price,duration,distance_traveled, pickup_location_geo, dropoff_location_geo)
-                       VALUES (:ride_id, :driver_id, :rider_id, :status, :total_price,
+                       INSERT INTO ride (ride_id,rider_id, status,total_price,duration,distance_traveled, pickup_location_geo, dropoff_location_geo)
+                       VALUES (:ride_id, :rider_id, :status, :total_price,
             :duration, :distance_traveled, :pickup_location_geo, :dropoff_location_geo)
                    """),
             {
                 "ride_id": fake.random_number(7,fix_len=True),
-                "driver_id": 0000000,
                 "rider_id": rider_id,
                 "status": "requested",
                 "total_price": estimated_price,
@@ -92,7 +91,7 @@ def accept_ride():
     data = request.json
     ride_id=data.get("ride_id")
     driver_id=data.get("driver_id")
-
+#total price --> database price totalprice=1+surge*
 
     with engine.connect() as conn:
         result = conn.execute(
@@ -100,17 +99,38 @@ def accept_ride():
             {"driver_id": driver_id}
 
         )
-        driver=result.fetchone()
-        status = result.scalar()
-        if not driver:
-            return jsonify({"error": "Driver not found"}), 404
-        elif status =="offline":
-            return jsonify({"error": "Driver offline"}), 404
+        test=conn.execute(text("select ride_id from ride_id r join surge_ride s on r.ride_id=s.ride_id where ride_id=:ride_id",
+        {"ride_id": ride_id}))
+        result2=conn.execute(text('select total_price from ride where ride_id=:ride_id',
+                                      {"ride_id": ride_id}
+                                  ))
+        total_price=result2.scalar()
+
+        type= conn.execute(text("Select 'd.type' from vehicle, v where driver_id = :driver_id"),
+                              {"driver_id": driver_id})
+        type=type.scalar()
+        type_price=0
+        if type=="premium":
+         type_price=0.1*total_price
+         total_price=total_price+type_price
+
+        elif type=="family":
+         type_price=0.25*total_price
+         total_price=total_price+type_price
+
+        else:
+            type_price=0
+            total_price=total_price+type_price
+
+        surge=conn.execute(text("select distinct on (r.ride_id) r.ride_id,s.surge_area_id1 from ride r join surge_areas "
+                                "on ST_DistanceSphere(r.pickup_location_geo,s.location)<5000 order by r.ride_id, "
+                                "ST_DistanceSphere(r.pickup_location_geo,s.location)"))
 
         conn.execute(
-            text("UPDATE ride SET status = :status WHERE ride_id = :ride_id AND driver_id=:driver_id"),
+            text("UPDATE ride SET status = :status,total_price= :total_price WHERE ride_id = :ride_id AND driver_id=:driver_id"),
             {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted'}
         )
+
 
         conn.commit()
 
