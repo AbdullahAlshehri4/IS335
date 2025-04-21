@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from sqlalchemy import text, false
-from dbSetup import engine, update
+from dbSetup import engine
 from faker import Faker
 
 app = Flask(__name__)
@@ -9,11 +9,12 @@ fake = Faker()
 #test
 @app.route('/rides/request', methods=['POST'])
 def request_ride():
-    flag=False
     data = request.json
     rider_name = data.get("rider_name")
-    drop_off = data.get("drop_off")
-    pick_up = data.get("pick_up")
+    drop_off_x = data.get("drop_off_x")
+    drop_off_y = data.get("drop_off_y")
+    pick_up_x = data.get("pick_up_x")
+    pick_up_y = data.get("pick_up_y")
 
 
 
@@ -27,7 +28,7 @@ def request_ride():
     with engine.connect() as conn:
 
         result = conn.execute(
-        text("SELECT rider_id, email, phone_number FROM rider WHERE name = :name LIMIT 1"),
+        text("SELECT rider_id, email, phone_number FROM rider WHERE name like :name LIMIT 1"),
             {"name": rider_name}
         )
         rider = result.fetchone()
@@ -39,41 +40,41 @@ def request_ride():
         result = conn.execute(
             text("""
                       SELECT ST_DistanceSphere(
-                   ST_GeomFromEWKB(decode(:pickup, 'hex')),
-                   ST_GeomFromEWKB(decode(:dropoff, 'hex'))
+                   ST_MakePoint(:drop_off_y,:drop_off_x),
+                   ST_MakePoint(:pickup_y,:pickup_x)
                                     ) / 1000 AS distance_km
 
                    """),
-            {"pickup": pick_up, "dropoff": drop_off}
+            {"pickup_y": pick_up_y,"pickup_x": pick_up_x,"drop_off_y": drop_off_y,"drop_off_x": drop_off_x}
         )
         distance_km = result.scalar()
 
 
 
         speed_kmh = 40
-        #duration_hours = distance_km / speed_kmh
-        #estimated_duration_minutes = int(duration_hours * 60)
+        duration_hours = distance_km / speed_kmh
+        estimated_duration_minutes = int(duration_hours * 60)
 
         estimated_price = round(distance_km * 5, 2)
-
-        #estimated_arrival_time = datetime.utcnow() + timedelta(minutes=estimated_duration_minutes)
 
 
         conn.execute(
             text("""
                        INSERT INTO ride (ride_id,rider_id, status,total_price,duration,distance_traveled, pickup_location_geo, dropoff_location_geo)
                        VALUES (:ride_id, :rider_id, :status, :total_price,
-            :duration, :distance_traveled, :pickup_location_geo, :dropoff_location_geo)
+            :duration, :distance_traveled, ST_MakePoint(:drop_off_y,:drop_off_x), ST_MakePoint(:pickup_off_y,:pickup_off_x))
                    """),
             {
                 "ride_id": fake.random_number(7,fix_len=True),
                 "rider_id": rider_id,
                 "status": "requested",
                 "total_price": estimated_price,
-                "duration": fake.time(),
+                "duration": estimated_duration_minutes,
                 "distance_traveled": distance_km,
-                "pickup_location_geo": pick_up,
-                "dropoff_location_geo": drop_off
+                "pickup_off_y": pick_up_y,
+                "pickup_off_x": pick_up_x,
+                "drop_off_y": pick_up_y,
+                "drop_off_x": pick_up_x,
             }
         )
 
@@ -93,7 +94,7 @@ def accept_ride():
     with engine.connect() as conn:
         ride_id = conn.execute(
             text("""
-                  SELECT r.ride_id,
+ SELECT r.ride_id,
                         ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000             AS distance_km,
                         (ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000) / 40 * 60 AS estimated_minutes
                  FROM driver d
@@ -101,11 +102,17 @@ def accept_ride():
                  WHERE d.driver_id= :driver_id 
                    AND d.status = 'online'
                    AND r.status = 'requested'
-                   AND r.driver_id IS NULL
+                   AND r.driver_id IS NULL 
                    AND ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000 <= 5
+                   AND NOT EXISTS (
+      SELECT 1
+      FROM ride r2
+      WHERE r2.driver_id = d.driver_id
+        AND r2.status IN ('requested', 'accepted','in_progress')
+  )
+
                  ORDER BY distance_km
-                 LIMIT 1
-                 """),
+                 LIMIT 1                 """),
             {"driver_id": driver_id}
         )
         if ride_id:
