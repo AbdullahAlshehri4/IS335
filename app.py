@@ -184,12 +184,13 @@ def accept_ride():
             conn.commit()
             return jsonify({
                 "message": "Ride accepted successfully",
-                "for_driver": driver_id,
-                "test": total_price,
+                "driver id": driver_id,
+                "ride id":ride_id,
+                "approximate price": total_price,
             }), 201
 
         if driver_status != "online":
-            return jsonify({"message": "Driver is not online"})
+            return jsonify({"message": "Driver is not online"}),404
         else:
             return jsonify({"message": "Ride is already accepted"})
 
