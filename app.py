@@ -89,63 +89,89 @@ def request_ride():
 @app.route('/rides/accept', methods=['POST'])
 def accept_ride():
     data = request.json
-    ride_id=str(data.get("ride_id"))
     driver_id=str(data.get("driver_id"))
-#total price --> database price totalprice=1+surge*
-
     with engine.connect() as conn:
-        driver_status = conn.execute(
-            text("SELECT status FROM driver WHERE driver_id = :driver_id"),
+        ride_id = conn.execute(
+            text("""
+                  SELECT r.ride_id,
+                        ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000             AS distance_km,
+                        (ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000) / 40 * 60 AS estimated_minutes
+                 FROM driver d
+                          CROSS JOIN ride r
+                 WHERE d.driver_id= :driver_id 
+                   AND d.status = 'online'
+                   AND r.status = 'requested'
+                   AND r.driver_id IS NULL
+                   AND ST_DistanceSphere(d.location, r.pickup_location_geo) / 1000 <= 5
+                 ORDER BY distance_km
+                 LIMIT 1
+                 """),
             {"driver_id": driver_id}
-
         )
-        driver_status=driver_status.scalar()
-        ride_status=conn.execute(text(
-            "Select status from ride where ride_id=:ride_id"),
-            {"ride_id":ride_id}
-        )
-        ride_status=ride_status.scalar()
-        if driver_status=="online" and ride_status=="requested":
-            result2 = conn.execute(
-                text('select total_price from ride where ride_id=:ride_id'),
-                {'ride_id': ride_id}
+        if ride_id:
+            ride_id,distance_km,estimated_minutes=ride_id.fetchone()
+            print(ride_id,distance_km,estimated_minutes)
+
+
+
+            driver_status = conn.execute(
+                    text("SELECT status FROM driver WHERE driver_id = :driver_id"),
+                    {"driver_id": driver_id}
+
+                )
+            driver_status=driver_status.scalar()
+            ride_status=conn.execute(text(
+                "Select status from ride where ride_id=:ride_id"),
+                {"ride_id":ride_id}
             )
-            total_price=result2.scalar()
+            ride_status=ride_status.scalar()
+            if driver_status=="online" and ride_status=="requested":
+                result2 = conn.execute(
+                    text('select total_price from ride where ride_id=:ride_id'),
+                    {'ride_id': ride_id}
+                )
+                total_price=result2.scalar()
 
-            type= conn.execute(text("Select d.type from vehicle d where driver_id=:driver_id"),
-                                  {"driver_id": driver_id})
-            type=type.scalar()
-            base_price=total_price
-            if type=="premium":
-                total_price*=1.1
-            elif type=="family":
-                total_price*=1.25
+                type= conn.execute(text("Select d.type from vehicle d where driver_id=:driver_id"),
+                                      {"driver_id": driver_id})
+                type=type.scalar()
+                base_price=total_price
+                if type=="premium":
+                    total_price*=1.1
+                elif type=="family":
+                    total_price*=1.25
 
-            surge = conn.execute(text(
-                "SELECT s.multiplier "
-                "FROM ride r "
-                "JOIN surge_areas s ON ST_DistanceSphere(r.pickup_location_geo, s.location) < 5000 "
-                "WHERE r.ride_id = :ride_id "
-                "ORDER BY ST_DistanceSphere(r.pickup_location_geo, s.location) "
-                "LIMIT 1"
-            ), {"ride_id": ride_id})
-            surge = surge.fetchone()
-            total_price+=(surge[0]-1)*base_price
-            conn.execute(
-                text("UPDATE ride SET status = :status,total_price= :total_price,driver_id=:driver_id WHERE ride_id = :ride_id"),
-                {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted',"total_price":total_price}
-            )
+                surge = conn.execute(text( #surge
+                    "SELECT s.multiplier "
+                    "FROM ride r "
+                    "JOIN surge_areas s ON ST_DistanceSphere(r.pickup_location_geo, s.location) < 5000 "
+                    "WHERE r.ride_id = :ride_id "
+                    "ORDER BY ST_DistanceSphere(r.pickup_location_geo, s.location) "
+                    "LIMIT 1"
+                ), {"ride_id": ride_id})
+                if surge.fetchone():
+                    surge = surge.fetchone()
+                    total_price+=(surge[0]-1)*base_price
 
-            conn.commit()
+                conn.execute(
+                    text("UPDATE ride SET status = :status,total_price= :total_price,driver_id=:driver_id WHERE ride_id = :ride_id"),
+                    {"ride_id": ride_id, "driver_id": driver_id, "status": 'accepted',"total_price":total_price}
+                )
+
+                conn.commit()
+                return jsonify({
+                    "message": "Ride accepted successfully  ",
+                    "for driver": driver_id,
+                    "test": total_price,
+                }), 201
             return jsonify({
-                "message": "Ride accepted successfully  ",
-                "for driver": driver_id,
-                "test": total_price,
-            }), 201
-        return jsonify({
-            "message": "Driver is not online" }) if driver_status=="online" else jsonify({
-            "message": "Ride is already accepted"
-        })
+                "message": "Driver is not online" }) if driver_status=="online" else jsonify({
+                "message": "Ride is already accepted"
+            })
+        else:
+            return jsonify({
+                "message": "No near rides "
+            })
 
 
 if __name__ == '__main__':
