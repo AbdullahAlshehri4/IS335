@@ -9,7 +9,7 @@ fake = Faker()
 @app.route('/rides/request', methods=['POST'])
 def request_ride():
     data = request.json
-    rider_name = data.get("rider_name")
+    rider_id = data.get("rider_id")
     drop_off_x = data.get("drop_off_x")
     drop_off_y = data.get("drop_off_y")
     pick_up_x = data.get("pick_up_x")
@@ -20,21 +20,21 @@ def request_ride():
 
 
 
-    if not rider_name:
-        return jsonify({"error": "Missing rider_name"}), 400
+    if not rider_id:
+        return jsonify({"error": "Missing rider_id"}), 400
 
 
     with engine.connect() as conn:
 
         result = conn.execute(
-        text("SELECT rider_id, email, phone_number FROM rider WHERE name like :name LIMIT 1"),
-            {"name": rider_name}
+        text("SELECT name, email, phone_number FROM rider WHERE rider_id = :rider_id LIMIT 1"),
+            {"rider_id":rider_id}
         )
         rider = result.fetchone()
         if not rider:
             return jsonify({"error": "Rider not found"}), 404
 
-        rider_id, email, phone_number = rider
+        rider_name,email, phone_number = rider
 
         result = conn.execute(
             text("""
@@ -82,8 +82,11 @@ def request_ride():
 
 
     return jsonify({
-        "message": "Ride requested successfully  ",
+        "message": "Ride requested successfully.",
         "For rider": rider_name,
+        "Phone number": phone_number,
+        "Email": email,
+        "Estimated Distance": distance_km,
     }), 201
 
 @app.route('/rides/accept', methods=['POST'])
